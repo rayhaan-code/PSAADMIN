@@ -1,0 +1,16 @@
+{
+  "name": "taawun-crm",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Taawun / VISS CRM — React + Express + PostgreSQL",
+  "scripts": {
+    "install:all": "cd server && npm install && cd ../client && npm install",
+    "build": "cd client && npm install && npm run build && cd ../server && npm install",
+    "db:migrate": "cd server && npx prisma migrate deploy",
+    "db:push": "cd server && npx prisma db push",
+    "db:seed": "cd server && npm run db:seed",
+    "start": "cd server && npm start",
+    "dev:server": "cd server && npm run dev",
+    "dev:client": "cd client && npm run dev"
+  }
+}

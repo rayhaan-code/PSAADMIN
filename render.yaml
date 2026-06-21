@@ -1,0 +1,25 @@
+# Render Blueprint — provisions a Postgres database + the web service.
+# After connecting your Git repo to Render, this file sets everything up.
+databases:
+  - name: taawun-crm-db
+    plan: free
+    databaseName: taawun_crm
+    user: taawun
+
+services:
+  - type: web
+    name: taawun-crm
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: taawun-crm-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: SEED_MANAGER_EMAIL
+        value: manager@taawun-crm.local
+      - key: SEED_MANAGER_PASSWORD
+        sync: false

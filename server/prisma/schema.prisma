@@ -1,0 +1,138 @@
+// Taawun / VISS CRM — Prisma schema
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  MANAGER
+  AGENT
+}
+
+enum ListType {
+  RENEWAL
+  LEAD
+  FOLLOW_UP
+  TRIAL
+  UNSCHEDULED
+}
+
+enum ActivityType {
+  CALL
+  NOTE
+  STATUS_CHANGE
+  FOLLOW_UP
+  IMPORT
+  LEAD_CREATED
+  ASSIGNED
+}
+
+model Location {
+  id        Int        @id @default(autoincrement())
+  name      String     @unique
+  users     User[]
+  customers Customer[]
+  batches   ImportBatch[]
+  createdAt DateTime   @default(now())
+}
+
+model User {
+  id           Int        @id @default(autoincrement())
+  name         String
+  email        String     @unique
+  passwordHash String
+  role         Role       @default(AGENT)
+  locationId   Int?
+  location     Location?  @relation(fields: [locationId], references: [id])
+  active       Boolean    @default(true)
+  customers    Customer[] @relation("AssignedAgent")
+  activities   Activity[]
+  batches      ImportBatch[]
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+}
+
+model Customer {
+  id                 Int        @id @default(autoincrement())
+  name               String?
+  phone              String     // normalized digits
+  phoneRaw           String?
+  whatsapp           String?
+  email              String?
+  age                Int?
+  activity           String?    // e.g. "Gymnastics | 2 X A Week"
+  program            String?    // Football, Gymnastics, Basketball, Swimming, Tennis, Summer Camp
+  listType           ListType   @default(FOLLOW_UP)
+  locationId         Int?
+  location           Location?  @relation(fields: [locationId], references: [id])
+  assignedAgentId    Int?
+  assignedAgent      User?      @relation("AssignedAgent", fields: [assignedAgentId], references: [id])
+
+  status             String?    // clean status label
+  paymentStatus      String?    // Paid, Pending, Overdue, Not Renewing
+  leadStage          String?    // Not Booked Yet, Shared Quotation, Trial Booked, Enrolled
+  source             String?    // Whatsapp, Meta, etc.
+  packageType        String?
+  noc                String?
+
+  renewalDate        DateTime?
+  inquiryDate        DateTime?
+  nextFollowUpDate   DateTime?
+  followUpStage      Int        @default(0)
+  needsManagerReview Boolean    @default(false)
+
+  notes              String?
+  sessions           Json?      // { invoiced, consumed, scheduled, yetToSchedule }
+
+  sourceFile         String?
+  importBatchId      Int?
+  importBatch        ImportBatch? @relation(fields: [importBatchId], references: [id])
+
+  activities         Activity[]
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+
+  // Dedupe key: same phone + program + location = same customer
+  @@unique([phone, program, locationId], name: "phone_program_location")
+  @@index([assignedAgentId])
+  @@index([locationId])
+  @@index([nextFollowUpDate])
+  @@index([renewalDate])
+  @@index([listType])
+}
+
+model Activity {
+  id         Int          @id @default(autoincrement())
+  customerId Int
+  customer   Customer     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  userId     Int?
+  user       User?        @relation(fields: [userId], references: [id])
+  type       ActivityType
+  detail     String?
+  createdAt  DateTime     @default(now())
+
+  @@index([customerId])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model ImportBatch {
+  id           Int        @id @default(autoincrement())
+  filename     String
+  format       String     // renewal | followup | meta
+  month        String?
+  locationId   Int?
+  location     Location?  @relation(fields: [locationId], references: [id])
+  rowCount     Int        @default(0)
+  createdCount Int        @default(0)
+  updatedCount Int        @default(0)
+  skippedCount Int        @default(0)
+  createdById  Int?
+  createdBy    User?      @relation(fields: [createdById], references: [id])
+  customers    Customer[]
+  createdAt    DateTime   @default(now())
+}
