@@ -3,6 +3,9 @@
 FROM node:20-slim AS build
 WORKDIR /app
 
+# Prisma needs openssl to generate/run its query engine.
+RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
+
 # Install client deps + build
 COPY client/package*.json ./client/
 RUN cd client && npm install
@@ -19,6 +22,10 @@ COPY server ./server
 FROM node:20-slim
 WORKDIR /app
 ENV NODE_ENV=production
+
+# Prisma's query engine needs openssl at runtime too.
+RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
+
 COPY --from=build /app/server ./server
 COPY --from=build /app/client/dist ./client/dist
 
