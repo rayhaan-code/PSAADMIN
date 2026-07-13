@@ -28,11 +28,41 @@ function CustomerRow({ c, onAction }) {
   );
 }
 
+function List({ title, rows, onAction }) {
+  return (
+    <>
+      <h4 style={{ margin: '12px 0 6px' }}>{title} ({rows.length})</h4>
+      {rows.length === 0 ? (
+        <p className="muted" style={{ margin: 0 }}>Nothing here right now.</p>
+      ) : (
+        <table>
+          <thead>
+            <tr><th>Name</th><th>Phone</th><th>Program</th><th>List</th><th>Location</th><th>Agent</th><th>Status</th><th>Date</th><th></th></tr>
+          </thead>
+          <tbody>
+            {rows.map((c) => <CustomerRow key={c.id} c={c} onAction={onAction} />)}
+          </tbody>
+        </table>
+      )}
+    </>
+  );
+}
+
+const EMPTY = {
+  today: { followUps: [], renewals: [] },
+  tomorrow: { followUps: [], renewals: [] },
+  next7: { followUpCount: 0, renewalCount: 0 },
+  total: { followUpCount: 0, renewalCount: 0 },
+  reviewFlagged: [],
+  callsToday: 0,
+};
+
 export default function Dashboard() {
   const { user } = useAuth();
   const [stats, setStats] = useState(null);
   const [retention, setRetention] = useState(null);
-  const [data, setData] = useState({ followUpsDue: [], renewalsDue: [], reviewFlagged: [] });
+  const [data, setData] = useState(EMPTY);
+  const [payments, setPayments] = useState(null);
   const [locations, setLocations] = useState([]);
   const [agents, setAgents] = useState([]);
   const [filters, setFilters] = useState({ locationId: '', agentId: '', ...thisMonthRange() });
@@ -55,6 +85,8 @@ export default function Dashboard() {
     const dqs = new URLSearchParams(qs);
     if (filters.start) dqs.set('start', filters.start);
     if (filters.end) dqs.set('end', filters.end);
+    // Payments (ClassCard invoices) only accept a branch locationId.
+    const pqs = filters.locationId ? `?locationId=${filters.locationId}` : '';
     try {
       const [s, t, r] = await Promise.all([
         api.get(`/dashboard/stats?${dqs.toString()}`),
@@ -64,6 +96,10 @@ export default function Dashboard() {
       setStats(s);
       setData(t);
       setRetention(r);
+      // Best-effort: hide the payments block if ClassCard isn't connected.
+      api.get(`/classcard/invoices/summary${pqs}`)
+        .then((p) => setPayments(p && p.configured ? p : null))
+        .catch(() => setPayments(null));
     } catch (e) {
       showToast(e.message, 'error');
     } finally {
@@ -99,7 +135,7 @@ export default function Dashboard() {
       )}
 
       <div className="topbar">
-        <h2>Who to call today</h2>
+        <h2>My day</h2>
       </div>
 
       {loading && !stats ? (
@@ -108,10 +144,7 @@ export default function Dashboard() {
         </div>
       ) : stats && (
         <div className="grid stats">
-          <div className="stat good">
-            <div className="n">{retention?.retentionRate != null ? `${retention.retentionRate}%` : '—'}</div>
-            <div className="l">Retention rate</div>
-          </div>
+          <div className="stat good"><div className="n">{data.callsToday}</div><div className="l">Calls logged today</div></div>
           <div className="stat bad"><div className="n">{stats.dueToday}</div><div className="l">Due today / overdue</div></div>
           <div className="stat warn"><div className="n">{stats.review}</div><div className="l">Needs manager review</div></div>
           <div className="stat"><div className="n">{stats.renewals}</div><div className="l">Renewals</div></div>
@@ -120,24 +153,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      {retention && (
-        <div className="card">
-          <h3 style={{ marginTop: 0 }}>Renewal health</h3>
-          <div className="row">
-            <div><b>Renewed:</b> {retention.renewed}</div>
-            <div><b>Not renewing:</b> {retention.notRenewing}</div>
-            <div><b>Pending:</b> {retention.pending}</div>
-            <div><b>Overdue:</b> {retention.overdue}</div>
-          </div>
-        </div>
-      )}
-
       <div className="filters">
-        <DateRangeFilter
-          start={filters.start}
-          end={filters.end}
-          onChange={(k, v) => setFilters((f) => ({ ...f, [k]: v }))}
-        />
         {isManager && (
           <>
             <div>
@@ -156,34 +172,86 @@ export default function Dashboard() {
             </div>
           </>
         )}
+        <DateRangeFilter
+          start={filters.start}
+          end={filters.end}
+          onChange={(k, v) => setFilters((f) => ({ ...f, [k]: v }))}
+        />
       </div>
       <p className="muted" style={{ marginTop: -4, fontSize: 12 }}>
-        Date range scopes the KPI stats above. The call lists below always show what's currently due.
+        Location/agent filters scope the day lists. The date range scopes the KPI stats and retention above.
       </p>
 
-      <Section title={`Follow-ups due / overdue (${data.followUpsDue.length})`} rows={data.followUpsDue} onAction={logFollowUp} />
-      <Section title={`Renewals due soon (${data.renewalsDue.length})`} rows={data.renewalsDue} onAction={logFollowUp} />
-      {isManager && <Section title={`Flagged for manager review (${data.reviewFlagged.length})`} rows={data.reviewFlagged} onAction={logFollowUp} />}
-    </>
-  );
-}
+      {/* TODAY */}
+      <div className="card">
+        <h3 style={{ marginTop: 0 }}>Today</h3>
+        <div className="row" style={{ marginBottom: 4 }}>
+          <div><b>Calls logged today:</b> {data.callsToday}</div>
+          {payments && (
+            <>
+              <div><b>Pending invoices:</b> {payments.pending} (AED {payments.pendingAmount})</div>
+              <div><b>Overdue invoices:</b> {payments.overdue} (AED {payments.overdueAmount})</div>
+            </>
+          )}
+        </div>
+        {payments && payments.branch && (
+          <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>Payments from ClassCard · {payments.branch}</p>
+        )}
+        <List title="Follow-ups due today / overdue" rows={data.today.followUps} onAction={logFollowUp} />
+        <List title="Renewals due today / overdue" rows={data.today.renewals} onAction={logFollowUp} />
+      </div>
 
-function Section({ title, rows, onAction }) {
-  return (
-    <div className="card">
-      <h3 style={{ marginTop: 0 }}>{title}</h3>
-      {rows.length === 0 ? (
-        <p className="muted">Nothing here right now.</p>
-      ) : (
-        <table>
-          <thead>
-            <tr><th>Name</th><th>Phone</th><th>Program</th><th>List</th><th>Location</th><th>Agent</th><th>Status</th><th>Date</th><th></th></tr>
-          </thead>
-          <tbody>
-            {rows.map((c) => <CustomerRow key={c.id} c={c} onAction={onAction} />)}
-          </tbody>
-        </table>
+      {/* TOMORROW */}
+      <div className="card">
+        <h3 style={{ marginTop: 0 }}>Tomorrow</h3>
+        <List title="Follow-ups" rows={data.tomorrow.followUps} onAction={logFollowUp} />
+        <List title="Renewals" rows={data.tomorrow.renewals} onAction={logFollowUp} />
+      </div>
+
+      {/* NEXT 7 DAYS + TOTAL */}
+      <div className="card">
+        <h3 style={{ marginTop: 0 }}>Upcoming workload</h3>
+        <div className="grid stats">
+          <div className="stat"><div className="n">{data.next7.followUpCount}</div><div className="l">Follow-ups · next 7 days</div></div>
+          <div className="stat"><div className="n">{data.next7.renewalCount}</div><div className="l">Renewals · next 7 days</div></div>
+          <div className="stat"><div className="n">{data.total.followUpCount}</div><div className="l">Follow-ups · total outstanding</div></div>
+          <div className="stat"><div className="n">{data.total.renewalCount}</div><div className="l">Renewals · total outstanding</div></div>
+        </div>
+        <p className="muted" style={{ marginBottom: 0, fontSize: 12 }}>
+          Next 7 days = tomorrow through a week out. Use the Customers page to work the full list.
+        </p>
+      </div>
+
+      {retention && (
+        <div className="card">
+          <h3 style={{ marginTop: 0 }}>Renewal health</h3>
+          <div className="row">
+            <div><b>Renewed:</b> {retention.renewed}</div>
+            <div><b>Not renewing:</b> {retention.notRenewing}</div>
+            <div><b>Pending:</b> {retention.pending}</div>
+            <div><b>Overdue:</b> {retention.overdue}</div>
+            <div><b>Retention rate:</b> {retention.retentionRate != null ? `${retention.retentionRate}%` : '—'}</div>
+          </div>
+        </div>
       )}
-    </div>
+
+      {isManager && (
+        <div className="card">
+          <h3 style={{ marginTop: 0 }}>Flagged for manager review ({data.reviewFlagged.length})</h3>
+          {data.reviewFlagged.length === 0 ? (
+            <p className="muted">Nothing here right now.</p>
+          ) : (
+            <table>
+              <thead>
+                <tr><th>Name</th><th>Phone</th><th>Program</th><th>List</th><th>Location</th><th>Agent</th><th>Status</th><th>Date</th><th></th></tr>
+              </thead>
+              <tbody>
+                {data.reviewFlagged.map((c) => <CustomerRow key={c.id} c={c} onAction={logFollowUp} />)}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+    </>
   );
 }
