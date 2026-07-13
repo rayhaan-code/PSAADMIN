@@ -1,12 +1,16 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api.js';
+import { useAuth } from '../lib/auth.jsx';
 
 export default function UsersAdmin() {
+  const { user: me } = useAuth();
   const [users, setUsers] = useState([]);
   const [locations, setLocations] = useState([]);
   const [form, setForm] = useState({ name: '', email: '', password: '', role: 'AGENT', locationId: '' });
   const [error, setError] = useState('');
   const [msg, setMsg] = useState('');
+  const [resetText, setResetText] = useState('');
+  const [wiping, setWiping] = useState(false);
 
   function load() {
     api.get('/users').then(setUsers).catch(() => {});
@@ -33,6 +37,30 @@ export default function UsersAdmin() {
   async function resetPassword(u) {
     const np = prompt(`New password for ${u.name}:`);
     if (np) update(u.id, { newPassword: np });
+  }
+
+  async function editName(u) {
+    const nn = prompt(`New name for ${u.name}:`, u.name);
+    if (nn && nn.trim() && nn !== u.name) update(u.id, { name: nn.trim() });
+  }
+
+  async function removeUser(u) {
+    if (!window.confirm(`Delete ${u.name}? Their customers stay but become unassigned. This cannot be undone.`)) return;
+    setError(''); setMsg('');
+    try { await api.del(`/users/${u.id}`); setMsg(`Deleted ${u.name}.`); load(); }
+    catch (err) { setError(err.message); }
+  }
+
+  async function resetData() {
+    setError(''); setMsg('');
+    setWiping(true);
+    try {
+      const r = await api.post('/users/reset/customers', { confirm: resetText });
+      setMsg(`Data cleared: ${r.deletedCustomers} customers and ${r.deletedBatches} import batches removed. You can now import fresh sheets.`);
+      setResetText('');
+      load();
+    } catch (err) { setError(err.message); }
+    finally { setWiping(false); }
   }
 
   return (
@@ -94,7 +122,13 @@ export default function UsersAdmin() {
                 <td>
                   <input type="checkbox" checked={u.active} onChange={(e) => update(u.id, { active: e.target.checked })} style={{ width: 'auto' }} />
                 </td>
-                <td><button className="btn small secondary" onClick={() => resetPassword(u)}>Reset password</button></td>
+                <td style={{ whiteSpace: 'nowrap' }}>
+                  <button className="btn small secondary" onClick={() => editName(u)}>Edit name</button>{' '}
+                  <button className="btn small secondary" onClick={() => resetPassword(u)}>Reset password</button>{' '}
+                  {u.id !== me?.id && (
+                    <button className="btn small danger" onClick={() => removeUser(u)}>Delete</button>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -104,6 +138,29 @@ export default function UsersAdmin() {
       <div className="card">
         <h3 style={{ marginTop: 0 }}>Locations</h3>
         <p className="muted">{locations.map((l) => `${l.name} (${l.customerCount})`).join('  ·  ')}</p>
+      </div>
+
+      <div className="card" style={{ borderColor: '#fecaca' }}>
+        <h3 style={{ marginTop: 0, color: '#b91c1c' }}>Danger zone — reset customer data</h3>
+        <p className="muted">
+          Permanently deletes <b>all customers, their call/note history, and import records</b> so you can import
+          fresh sheets. Users and locations are kept. This <b>cannot be undone</b> and there is no automatic backup.
+        </p>
+        <p className="muted">To confirm, type <b>CONFIRM</b> below, then click the button.</p>
+        <div className="row">
+          <div>
+            <label>Confirmation</label>
+            <input value={resetText} onChange={(e) => setResetText(e.target.value)} placeholder="Type CONFIRM" />
+          </div>
+        </div>
+        <button
+          className="btn danger"
+          style={{ marginTop: 12 }}
+          disabled={wiping || resetText !== 'CONFIRM'}
+          onClick={resetData}
+        >
+          {wiping ? 'Clearing…' : 'Delete all customer data'}
+        </button>
       </div>
     </>
   );

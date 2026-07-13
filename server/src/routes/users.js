@@ -60,4 +60,40 @@ router.patch('/:id', requireManager, async (req, res) => {
   res.json({ id: user.id, name: user.name, email: user.email, role: user.role, active: user.active });
 });
 
+// Delete a user (manager only). Guards against locking everyone out:
+//  - can't delete yourself
+//  - can't delete the last remaining manager
+// The user's customers are detached (assignedAgentId set to null), not deleted.
+router.delete('/:id', requireManager, async (req, res) => {
+  const id = Number(req.params.id);
+  if (id === req.user.id) return res.status(400).json({ error: 'You cannot delete your own account' });
+
+  const target = await prisma.user.findUnique({ where: { id } });
+  if (!target) return res.status(404).json({ error: 'User not found' });
+
+  if (target.role === 'MANAGER') {
+    const managerCount = await prisma.user.count({ where: { role: 'MANAGER' } });
+    if (managerCount <= 1) return res.status(400).json({ error: 'Cannot delete the last manager' });
+  }
+
+  // Detach customers and activities so we don't orphan/foreign-key error.
+  await prisma.customer.updateMany({ where: { assignedAgentId: id }, data: { assignedAgentId: null } });
+  await prisma.activity.updateMany({ where: { userId: id }, data: { userId: null } });
+  await prisma.user.delete({ where: { id } });
+  res.json({ ok: true, deletedId: id });
+});
+
+// DANGER: wipe all customer data so fresh sheets can be imported (manager only).
+// Deletes: all customers (their activities cascade via schema) + all import batches.
+// Keeps: all users and locations. Requires an explicit confirm flag in the body.
+router.post('/reset/customers', requireManager, async (req, res) => {
+  if (req.body?.confirm !== 'CONFIRM') {
+    return res.status(400).json({ error: 'Confirmation required. Type CONFIRM to proceed.' });
+  }
+  // Customers reference ImportBatch, so delete customers first, then batches.
+  const customers = await prisma.customer.deleteMany({});
+  const batches = await prisma.importBatch.deleteMany({});
+  res.json({ ok: true, deletedCustomers: customers.count, deletedBatches: batches.count });
+});
+
 export default router;
