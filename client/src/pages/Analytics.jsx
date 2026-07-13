@@ -13,24 +13,28 @@ function Stat({ label, value, tone }) {
 
 function pct(v) { return v == null ? '—' : `${v}%`; }
 
-function ClassCardPanel() {
+function ClassCardPanel({ locationId }) {
   const [status, setStatus] = useState(null);
   const [invoices, setInvoices] = useState(null);
   const [capacity, setCapacity] = useState(null);
 
   useEffect(() => {
-    api.get('/classcard/status').then(setStatus).catch(() => setStatus({ configured: false }));
-    api.get('/classcard/invoices/summary').then(setInvoices).catch(() => {});
-    api.get('/classcard/capacity').then(setCapacity).catch(() => {});
-  }, []);
+    // Reset when the branch changes so we never show another branch's numbers.
+    setStatus(null); setInvoices(null); setCapacity(null);
+    const q = locationId ? `?locationId=${locationId}` : '';
+    api.get(`/classcard/status${q}`).then(setStatus).catch(() => setStatus({ configured: false }));
+    api.get(`/classcard/invoices/summary${q}`).then(setInvoices).catch(() => {});
+    api.get(`/classcard/capacity${q}`).then(setCapacity).catch(() => {});
+  }, [locationId]);
 
   if (status && status.configured === false) {
     return (
       <div className="card" style={{ borderColor: '#fde68a' }}>
         <h3 style={{ marginTop: 0 }}>ClassCard integration</h3>
         <p className="muted">
-          Not connected yet. Add your ClassCard API key as <b>CLASSCARD_API_KEY</b> in the server environment
-          to see invoices, attendance, and capacity here.
+          {status.branch ? <>Not connected for <b>{status.branch}</b> yet. </> : 'Not connected yet. '}
+          Add this branch's ClassCard API key as <b>CLASSCARD_API_KEY_&lt;BRANCH&gt;</b> in the server
+          environment (e.g. <code>CLASSCARD_API_KEY_AL_MAJAZ</code>) to see its invoices, attendance, and capacity here.
         </p>
       </div>
     );
@@ -212,6 +216,8 @@ export default function Analytics() {
               </div>
             </>
           )}
+          {/* ClassCard metrics for the selected branch */}
+          {locationId && <ClassCardPanel locationId={locationId} />}
         </>
       )}
 
@@ -276,9 +282,6 @@ export default function Analytics() {
           </table>
         </div>
       )}
-
-      {/* CLASSCARD (managers only) */}
-      {isManager && <ClassCardPanel />}
     </>
   );
 }

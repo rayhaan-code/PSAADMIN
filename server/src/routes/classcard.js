@@ -43,23 +43,42 @@ function asArray(resp) {
   return [];
 }
 
+// Resolve the ClassCard config for the request's branch. Managers pass
+// ?locationId=; if omitted we fall back to the user's own location, then to the
+// global key. Returns { cfg, location } where cfg carries the branch's api key.
+async function branchConfig(req) {
+  const locationId = req.query.locationId
+    ? Number(req.query.locationId)
+    : (req.user && req.user.locationId) || null;
+  let location = null;
+  if (locationId) {
+    location = await prisma.location.findUnique({ where: { id: locationId } });
+  }
+  return { cfg: cc.resolveBranchConfig(location), location };
+}
+
 // --- Connection status (managers only). ---
 router.get('/status', requireManager, async (req, res) => {
-  if (!cc.isConfigured()) return notConfigured(res);
+  // Nothing configured anywhere -> "connect ClassCard" state.
+  if (!cc.hasAnyKey()) return notConfigured(res);
+  const { cfg, location } = await branchConfig(req);
+  // A key exists somewhere, but not for this specific branch.
+  if (!cc.isConfigured(cfg)) return notConfigured(res, { branch: location ? location.name : null });
   try {
     // Cheap call to verify the key works.
-    await cc.getInvoices({ detailed: false });
-    res.json({ configured: true, ok: true });
+    await cc.getInvoices(cfg, { detailed: false });
+    res.json({ configured: true, ok: true, branch: location ? location.name : null });
   } catch (err) {
-    res.json({ configured: true, ok: false, error: err.message });
+    res.json({ configured: true, ok: false, branch: location ? location.name : null, error: err.message });
   }
 });
 
 // --- Invoices: pending / overdue summary (managers only). ---
 router.get('/invoices/summary', requireManager, async (req, res, next) => {
-  if (!cc.isConfigured()) return notConfigured(res);
+  const { cfg, location } = await branchConfig(req);
+  if (!cc.isConfigured(cfg)) return notConfigured(res, { branch: location ? location.name : null });
   try {
-    const raw = await cc.getInvoices({ detailed: true });
+    const raw = await cc.getInvoices(cfg, { detailed: true });
     const invoices = asArray(raw);
     const now = new Date();
 
@@ -84,6 +103,7 @@ router.get('/invoices/summary', requireManager, async (req, res, next) => {
 
     res.json({
       configured: true,
+      branch: location ? location.name : null,
       total: invoices.length,
       paid,
       pending,
@@ -97,7 +117,8 @@ router.get('/invoices/summary', requireManager, async (req, res, next) => {
 // --- Unmarked attendance for a CRM customer (matched by phone). ---
 // Query: ?customerId= & ?start= & ?end=  (dates default to last 30 days)
 router.get('/attendance/unmarked', requireManager, async (req, res, next) => {
-  if (!cc.isConfigured()) return notConfigured(res);
+  const { cfg, location } = await branchConfig(req);
+  if (!cc.isConfigured(cfg)) return notConfigured(res, { branch: location ? location.name : null });
   try {
     const customerId = req.query.customerId ? Number(req.query.customerId) : null;
     if (!customerId) return res.status(400).json({ error: 'customerId is required' });
@@ -110,11 +131,11 @@ router.get('/attendance/unmarked', requireManager, async (req, res, next) => {
     const target = normalizePhone(customer.phone);
     let student = null;
     if (customer.email) {
-      const list = asArray(await cc.getStudentList({ email: customer.email }));
+      const list = asArray(await cc.getStudentList(cfg, { email: customer.email }));
       student = list.find((s) => normalizePhone(pick(s, ['phone1', 'phone', 'mobile'], '')) === target) || list[0] || null;
     }
     if (!student) {
-      return res.json({ configured: true, matched: false, message: 'No ClassCard student matched this customer.' });
+      return res.json({ configured: true, branch: location ? location.name : null, matched: false, message: 'No ClassCard student matched this customer.' });
     }
 
     const end = req.query.end || new Date().toISOString().slice(0, 10);
@@ -123,7 +144,7 @@ router.get('/attendance/unmarked', requireManager, async (req, res, next) => {
     const start = req.query.start || startDate.toISOString().slice(0, 10);
 
     const studentId = pick(student, ['id', 'student_id', 'studentId']);
-    const events = asArray(await cc.getStudentEvents({ student: studentId, start, end }));
+    const events = asArray(await cc.getStudentEvents(cfg, { student: studentId, start, end }));
 
     // "Unmarked" = a past event with no attendance status set.
     const now = new Date();
@@ -138,6 +159,7 @@ router.get('/attendance/unmarked', requireManager, async (req, res, next) => {
 
     res.json({
       configured: true,
+      branch: location ? location.name : null,
       matched: true,
       studentId,
       window: { start, end },
@@ -153,10 +175,11 @@ router.get('/attendance/unmarked', requireManager, async (req, res, next) => {
 // Best-effort: reads staff services/events to estimate enrolled vs capacity.
 // Field names confirmed against real data during testing; defensive for now.
 router.get('/capacity', requireManager, async (req, res, next) => {
-  if (!cc.isConfigured()) return notConfigured(res);
+  const { cfg, location } = await branchConfig(req);
+  if (!cc.isConfigured(cfg)) return notConfigured(res, { branch: location ? location.name : null });
   try {
     const staffId = req.query.staffId || null;
-    const events = asArray(await cc.getStaffEvents(staffId ? { staff_id: staffId } : {}));
+    const events = asArray(await cc.getStaffEvents(cfg, staffId ? { staff_id: staffId } : {}));
 
     const rows = events.map((ev) => {
       const capacity = Number(pick(ev, ['capacity', 'max_capacity', 'maxStudents', 'limit'], 0)) || 0;
@@ -176,7 +199,7 @@ router.get('/capacity', requireManager, async (req, res, next) => {
       ? Math.round((rows.reduce((a, r) => a + (r.utilization || 0), 0) / rows.length) * 10) / 10
       : null;
 
-    res.json({ configured: true, classes: rows.length, full, avgUtilization: avgUtil, rows });
+    res.json({ configured: true, branch: location ? location.name : null, classes: rows.length, full, avgUtilization: avgUtil, rows });
   } catch (err) { next(err); }
 });
 
