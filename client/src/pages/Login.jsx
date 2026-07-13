@@ -29,7 +29,7 @@ export default function Login() {
   return (
     <div className="login-wrap">
       <form className="login-card" onSubmit={submit}>
-        <h2 style={{ marginTop: 0 }}>Taawun / VISS CRM</h2>
+        <h2 style={{ marginTop: 0 }}>PSA Admin</h2>
         <p className="muted">Sign in to your account</p>
         <label>Email</label>
         <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoFocus required />

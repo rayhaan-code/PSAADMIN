@@ -11,10 +11,18 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 
 router.post('/', requireAuth, requireManager, upload.array('files', 30), async (req, res) => {
   if (!req.files || req.files.length === 0) return res.status(400).json({ error: 'No files uploaded' });
 
+  // Optional: assign every imported customer to a specific user (overrides sheet agent).
+  let assignToUserId = null;
+  if (req.body.assignToUserId) {
+    assignToUserId = Number(req.body.assignToUserId);
+    const target = await prisma.user.findUnique({ where: { id: assignToUserId } });
+    if (!target) return res.status(400).json({ error: 'Selected user to assign to was not found' });
+  }
+
   const results = [];
   for (const file of req.files) {
     try {
-      const summary = await importWorkbookBuffer(file.buffer, file.originalname, { createdById: req.user.id });
+      const summary = await importWorkbookBuffer(file.buffer, file.originalname, { createdById: req.user.id, assignToUserId });
       results.push({ ok: true, ...summary });
     } catch (err) {
       results.push({ ok: false, filename: file.originalname, error: err.message });

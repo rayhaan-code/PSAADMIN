@@ -16,7 +16,7 @@ function Shell({ children }) {
   return (
     <div className="app-shell">
       <nav className="sidebar">
-        <h1>Taawun CRM</h1>
+        <h1>PSA Admin</h1>
         <NavLink to="/" end>Dashboard</NavLink>
         <NavLink to="/customers">Customers</NavLink>
         <NavLink to="/add-lead">Add Lead</NavLink>

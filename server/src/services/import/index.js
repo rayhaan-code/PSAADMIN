@@ -39,7 +39,7 @@ async function getOrCreateAgent(name, locationId, cache) {
 }
 
 // Import a single workbook buffer. Returns a summary.
-export async function importWorkbookBuffer(buffer, filename, { createdById = null } = {}) {
+export async function importWorkbookBuffer(buffer, filename, { createdById = null, assignToUserId = null } = {}) {
   const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: false });
   const format = detectFormat(workbook);
   if (format === 'unknown') {
@@ -70,7 +70,9 @@ export async function importWorkbookBuffer(buffer, filename, { createdById = nul
   for (const rec of records) {
     try {
       const locationId = (await getOrCreateLocation(rec.location, locCache)) ?? fileLocationId;
-      const assignedAgentId = await getOrCreateAgent(rec.agent, locationId, agentCache);
+      // If the importer chose an explicit admin/agent to assign to, that overrides the
+      // per-row agent from the sheet. Otherwise fall back to the sheet's agent.
+      const assignedAgentId = assignToUserId ?? (await getOrCreateAgent(rec.agent, locationId, agentCache));
       const program = rec.program || 'General';
 
       // Dedupe key: phone + program + location
@@ -89,7 +91,8 @@ export async function importWorkbookBuffer(buffer, filename, { createdById = nul
         program,
         listType: rec.listType,
         locationId,
-        assignedAgentId: assignedAgentId ?? existing?.assignedAgentId ?? null,
+        // Explicit override always wins; otherwise keep sheet agent, then existing.
+        assignedAgentId: assignToUserId ?? assignedAgentId ?? existing?.assignedAgentId ?? null,
         status: rec.status ?? existing?.status ?? null,
         paymentStatus: rec.paymentStatus ?? existing?.paymentStatus ?? null,
         leadStage: rec.leadStage ?? existing?.leadStage ?? null,

@@ -9,11 +9,16 @@ export default function ImportPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [batches, setBatches] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [assignToUserId, setAssignToUserId] = useState('');
 
   function loadBatches() {
     api.get('/import/batches').then(setBatches).catch(() => {});
   }
-  useEffect(() => { loadBatches(); }, []);
+  useEffect(() => {
+    loadBatches();
+    api.get('/users').then(setUsers).catch(() => {});
+  }, []);
 
   async function upload(e) {
     e.preventDefault();
@@ -21,6 +26,7 @@ export default function ImportPage() {
     if (!files.length) { setError('Choose at least one .xlsx file.'); return; }
     const fd = new FormData();
     for (const f of files) fd.append('files', f);
+    if (assignToUserId) fd.append('assignToUserId', assignToUserId);
     setBusy(true);
     try {
       const data = await api.upload('/import', fd);
@@ -45,6 +51,19 @@ export default function ImportPage() {
         </p>
         <form onSubmit={upload}>
           <input type="file" accept=".xlsx" multiple onChange={(e) => setFiles([...e.target.files])} />
+          <div style={{ marginTop: 12 }}>
+            <label>Assign imported customers to</label>
+            <select value={assignToUserId} onChange={(e) => setAssignToUserId(e.target.value)}>
+              <option value="">Keep agent from the sheet</option>
+              {users.map((u) => (
+                <option key={u.id} value={u.id}>{u.name} · {u.role}{u.location ? ` · ${u.location}` : ''}</option>
+              ))}
+            </select>
+            <p className="muted" style={{ marginTop: 4 }}>
+              Choose an admin/agent to assign every imported row to. Leave as “Keep agent from the sheet”
+              to use the agent column in the file.
+            </p>
+          </div>
           <div style={{ marginTop: 12 }}>
             <button className="btn" disabled={busy}>{busy ? 'Importing…' : `Import ${files.length || ''} file(s)`}</button>
           </div>
