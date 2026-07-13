@@ -9,9 +9,10 @@
 // common variants are tried) so this keeps working across minor API shape
 // differences. Students are linked to CRM customers by normalized phone number.
 //
-// Everything here is READ-ONLY. Managers only.
+// Everything here is READ-ONLY. Managers see any branch (via ?locationId=);
+// agents are locked to their own branch and their own customers.
 import { Router } from 'express';
-import { requireAuth, requireManager } from '../middleware/auth.js';
+import { requireAuth, scopeForUser } from '../middleware/auth.js';
 import { prisma } from '../lib/prisma.js';
 import { normalizePhone } from '../lib/phone.js';
 import * as cc from '../services/classcard/client.js';
@@ -43,12 +44,15 @@ function asArray(resp) {
   return [];
 }
 
-// Resolve the ClassCard config for the request's branch. Managers pass
-// ?locationId=; if omitted we fall back to the user's own location, then to the
-// global key. Returns { cfg, location } where cfg carries the branch's api key.
+// Resolve the ClassCard config for the request's branch.
+//   Managers  -> may pass ?locationId=; falls back to their own location.
+//   Agents    -> LOCKED to their own user.locationId (?locationId= is ignored),
+//                so an agent can only ever see their own branch's data.
+// Returns { cfg, location } where cfg carries the branch's api key.
 async function branchConfig(req) {
-  const locationId = req.query.locationId
-    ? Number(req.query.locationId)
+  const isManager = req.user && req.user.role === 'MANAGER';
+  const locationId = isManager
+    ? (req.query.locationId ? Number(req.query.locationId) : (req.user && req.user.locationId) || null)
     : (req.user && req.user.locationId) || null;
   let location = null;
   if (locationId) {
@@ -68,8 +72,8 @@ async function findStudentForCustomer(cfg, customer) {
   return null;
 }
 
-// --- Connection status (managers only). ---
-router.get('/status', requireManager, async (req, res) => {
+// --- Connection status. Managers pick a branch; agents see their own. ---
+router.get('/status', async (req, res) => {
   // Nothing configured anywhere -> "connect ClassCard" state.
   if (!cc.hasAnyKey()) return notConfigured(res);
   const { cfg, location } = await branchConfig(req);
@@ -84,8 +88,8 @@ router.get('/status', requireManager, async (req, res) => {
   }
 });
 
-// --- Invoices: pending / overdue summary (managers only). ---
-router.get('/invoices/summary', requireManager, async (req, res, next) => {
+// --- Invoices: pending / overdue summary. Branch-scoped for agents. ---
+router.get('/invoices/summary', async (req, res, next) => {
   const { cfg, location } = await branchConfig(req);
   if (!cc.isConfigured(cfg)) return notConfigured(res, { branch: location ? location.name : null });
   try {
@@ -127,14 +131,15 @@ router.get('/invoices/summary', requireManager, async (req, res, next) => {
 
 // --- Unmarked attendance for a CRM customer (matched by phone). ---
 // Query: ?customerId= & ?start= & ?end=  (dates default to last 30 days)
-router.get('/attendance/unmarked', requireManager, async (req, res, next) => {
+router.get('/attendance/unmarked', async (req, res, next) => {
   const { cfg, location } = await branchConfig(req);
   if (!cc.isConfigured(cfg)) return notConfigured(res, { branch: location ? location.name : null });
   try {
     const customerId = req.query.customerId ? Number(req.query.customerId) : null;
     if (!customerId) return res.status(400).json({ error: 'customerId is required' });
 
-    const customer = await prisma.customer.findUnique({ where: { id: customerId } });
+    // Agents may only inspect their own customers.
+    const customer = await prisma.customer.findFirst({ where: scopeForUser(req.user, { id: customerId }) });
     if (!customer) return res.status(404).json({ error: 'Customer not found' });
 
     // Find the ClassCard student by phone (confirmed via email when available).
@@ -176,10 +181,10 @@ router.get('/attendance/unmarked', requireManager, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// --- Capacity overview (managers only). ---
+// --- Capacity overview. Branch-scoped for agents. ---
 // Best-effort: reads staff services/events to estimate enrolled vs capacity.
 // Field names confirmed against real data during testing; defensive for now.
-router.get('/capacity', requireManager, async (req, res, next) => {
+router.get('/capacity', async (req, res, next) => {
   const { cfg, location } = await branchConfig(req);
   if (!cc.isConfigured(cfg)) return notConfigured(res, { branch: location ? location.name : null });
   try {
@@ -231,15 +236,19 @@ function summarizeInvoices(invoices) {
 
 // --- Per-customer ClassCard summary (attendance + invoices), matched by phone. ---
 // Query: ?customerId= & ?locationId= (optional) & ?start= & ?end= (attendance window)
-router.get('/student/summary', requireManager, async (req, res, next) => {
+router.get('/student/summary', async (req, res, next) => {
   const customerId = req.query.customerId ? Number(req.query.customerId) : null;
   if (!customerId) return res.status(400).json({ error: 'customerId is required' });
 
-  const customer = await prisma.customer.findUnique({ where: { id: customerId } });
+  // Agents may only inspect their own customers.
+  const customer = await prisma.customer.findFirst({ where: scopeForUser(req.user, { id: customerId }) });
   if (!customer) return res.status(404).json({ error: 'Customer not found' });
 
-  // Default branch to the customer's own location when not supplied.
-  if (!req.query.locationId && customer.locationId) req.query.locationId = String(customer.locationId);
+  // Managers may default the branch to the customer's own location; agents are
+  // always locked to their own branch inside branchConfig().
+  if (req.user.role === 'MANAGER' && !req.query.locationId && customer.locationId) {
+    req.query.locationId = String(customer.locationId);
+  }
   const { cfg, location } = await branchConfig(req);
   if (!cc.isConfigured(cfg)) return notConfigured(res, { branch: location ? location.name : null });
 
@@ -285,8 +294,8 @@ router.get('/student/summary', requireManager, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// --- Branch student list (managers only). List-only to stay fast (no N+1). ---
-router.get('/students', requireManager, async (req, res, next) => {
+// --- Branch student list. Branch-scoped for agents. List-only (no N+1). ---
+router.get('/students', async (req, res, next) => {
   const { cfg, location } = await branchConfig(req);
   if (!cc.isConfigured(cfg)) return notConfigured(res, { branch: location ? location.name : null });
   try {

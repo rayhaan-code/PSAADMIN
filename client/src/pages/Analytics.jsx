@@ -317,6 +317,13 @@ export default function Analytics() {
               </div>
             </>
           )}
+          {/* Agents: ClassCard metrics for their own branch (server-locked). */}
+          {!isManager && (
+            <>
+              <ClassCardPanel locationId="" />
+              <StudentsPanel locationId="" />
+            </>
+          )}
           {isManager && !userId && <p className="muted">Select an agent to see their KPIs.</p>}
         </>
       )}

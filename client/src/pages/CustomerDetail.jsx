@@ -28,12 +28,12 @@ export default function CustomerDetail() {
   // eslint-disable-next-line
   }, [id]);
 
-  // ClassCard student summary (managers only — the endpoint is manager-scoped).
+  // ClassCard student summary. Available to agents too — the server scopes the
+  // customer to the caller and locks agents to their own branch.
   useEffect(() => {
-    if (!isManager) return;
     setClasscard(null);
     api.get(`/classcard/student/summary?customerId=${id}`).then(setClasscard).catch(() => setClasscard(null));
-  }, [id, isManager]);
+  }, [id]);
 
   if (!c) return <div>Loading…</div>;
 
@@ -124,7 +124,7 @@ export default function CustomerDetail() {
         </div>
       </div>
 
-      {isManager && classcard && classcard.configured !== false && (
+      {classcard && classcard.configured !== false && (
         <div className="card">
           <h3 style={{ marginTop: 0 }}>ClassCard {classcard.branch ? <span className="muted">· {classcard.branch}</span> : null}</h3>
           {!classcard.matched ? (
