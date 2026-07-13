@@ -7,6 +7,7 @@ import CustomerDetail from './pages/CustomerDetail.jsx';
 import AddLead from './pages/AddLead.jsx';
 import ImportPage from './pages/ImportPage.jsx';
 import UsersAdmin from './pages/UsersAdmin.jsx';
+import Analytics from './pages/Analytics.jsx';
 
 function Shell({ children }) {
   const { user, logout } = useAuth();
@@ -19,6 +20,7 @@ function Shell({ children }) {
         <NavLink to="/" end>Dashboard</NavLink>
         <NavLink to="/customers">Customers</NavLink>
         <NavLink to="/add-lead">Add Lead</NavLink>
+        <NavLink to="/analytics">Analytics</NavLink>
         {isManager && <NavLink to="/import">Import Excel</NavLink>}
         {isManager && <NavLink to="/users">Users</NavLink>}
         <div className="spacer" />
@@ -49,6 +51,7 @@ export default function App() {
       <Route path="/customers" element={<Protected><CustomerList /></Protected>} />
       <Route path="/customers/:id" element={<Protected><CustomerDetail /></Protected>} />
       <Route path="/add-lead" element={<Protected><AddLead /></Protected>} />
+      <Route path="/analytics" element={<Protected><Analytics /></Protected>} />
       <Route path="/import" element={<Protected managerOnly><ImportPage /></Protected>} />
       <Route path="/users" element={<Protected managerOnly><UsersAdmin /></Protected>} />
       <Route path="*" element={<Navigate to="/" replace />} />
