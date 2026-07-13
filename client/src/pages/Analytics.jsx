@@ -13,6 +13,76 @@ function Stat({ label, value, tone }) {
 
 function pct(v) { return v == null ? '—' : `${v}%`; }
 
+function ClassCardPanel() {
+  const [status, setStatus] = useState(null);
+  const [invoices, setInvoices] = useState(null);
+  const [capacity, setCapacity] = useState(null);
+
+  useEffect(() => {
+    api.get('/classcard/status').then(setStatus).catch(() => setStatus({ configured: false }));
+    api.get('/classcard/invoices/summary').then(setInvoices).catch(() => {});
+    api.get('/classcard/capacity').then(setCapacity).catch(() => {});
+  }, []);
+
+  if (status && status.configured === false) {
+    return (
+      <div className="card" style={{ borderColor: '#fde68a' }}>
+        <h3 style={{ marginTop: 0 }}>ClassCard integration</h3>
+        <p className="muted">
+          Not connected yet. Add your ClassCard API key as <b>CLASSCARD_API_KEY</b> in the server environment
+          to see invoices, attendance, and capacity here.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="card">
+        <h3 style={{ marginTop: 0 }}>ClassCard — invoices</h3>
+        {invoices?.configured ? (
+          <div className="grid stats">
+            <Stat label="Pending" value={invoices.pending} tone="warn" />
+            <Stat label="Overdue" value={invoices.overdue} tone="bad" />
+            <Stat label="Paid" value={invoices.paid} tone="good" />
+            <Stat label="Pending amount" value={invoices.pendingAmount} />
+            <Stat label="Overdue amount" value={invoices.overdueAmount} />
+            <Stat label="Total invoices" value={invoices.total} />
+          </div>
+        ) : <p className="muted">Loading invoice data…</p>}
+      </div>
+
+      <div className="card">
+        <h3 style={{ marginTop: 0 }}>ClassCard — capacity</h3>
+        {capacity?.configured ? (
+          <>
+            <div className="grid stats">
+              <Stat label="Classes" value={capacity.classes} />
+              <Stat label="Full classes" value={capacity.full} tone={capacity.full > 0 ? 'warn' : 'good'} />
+              <Stat label="Avg utilization" value={pct(capacity.avgUtilization)} />
+            </div>
+            {capacity.rows?.length > 0 && (
+              <table>
+                <thead><tr><th>Class</th><th>Enrolled</th><th>Capacity</th><th>Utilization</th></tr></thead>
+                <tbody>
+                  {capacity.rows.slice(0, 20).map((r, i) => (
+                    <tr key={i}>
+                      <td>{r.name}</td>
+                      <td>{r.enrolled}</td>
+                      <td>{r.capacity || '—'}</td>
+                      <td>{pct(r.utilization)}{r.full ? ' · FULL' : ''}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </>
+        ) : <p className="muted">Loading capacity data…</p>}
+      </div>
+    </>
+  );
+}
+
 function SummaryCards({ s }) {
   if (!s) return null;
   return (
@@ -206,6 +276,9 @@ export default function Analytics() {
           </table>
         </div>
       )}
+
+      {/* CLASSCARD (managers only) */}
+      {isManager && <ClassCardPanel />}
     </>
   );
 }
