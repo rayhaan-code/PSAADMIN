@@ -31,7 +31,7 @@ function CustomerRow({ c, onAction }) {
 function List({ title, rows, onAction }) {
   return (
     <>
-      <h4 style={{ margin: '12px 0 6px' }}>{title} ({rows.length})</h4>
+      <div className="section-title">{title} ({rows.length})</div>
       {rows.length === 0 ? (
         <p className="muted" style={{ margin: 0 }}>Nothing here right now.</p>
       ) : (
@@ -135,7 +135,10 @@ export default function Dashboard() {
       )}
 
       <div className="topbar">
-        <h2>My day</h2>
+        <div>
+          <h2>My day</h2>
+          <div className="sub">Follow-ups, renewals and payments at a glance.</div>
+        </div>
       </div>
 
       {loading && !stats ? (
@@ -185,12 +188,12 @@ export default function Dashboard() {
       {/* TODAY */}
       <div className="card">
         <h3 style={{ marginTop: 0 }}>Today</h3>
-        <div className="row" style={{ marginBottom: 4 }}>
-          <div><b>Calls logged today:</b> {data.callsToday}</div>
+        <div className="pill-row">
+          <span className="pill good">Calls logged today <b>{data.callsToday}</b></span>
           {payments && (
             <>
-              <div><b>Pending invoices:</b> {payments.pending} (AED {payments.pendingAmount})</div>
-              <div><b>Overdue invoices:</b> {payments.overdue} (AED {payments.overdueAmount})</div>
+              <span className="pill warn">Pending invoices <b>{payments.pending}</b> · AED {payments.pendingAmount}</span>
+              <span className="pill bad">Overdue invoices <b>{payments.overdue}</b> · AED {payments.overdueAmount}</span>
             </>
           )}
         </div>
@@ -225,12 +228,12 @@ export default function Dashboard() {
       {retention && (
         <div className="card">
           <h3 style={{ marginTop: 0 }}>Renewal health</h3>
-          <div className="row">
-            <div><b>Renewed:</b> {retention.renewed}</div>
-            <div><b>Not renewing:</b> {retention.notRenewing}</div>
-            <div><b>Pending:</b> {retention.pending}</div>
-            <div><b>Overdue:</b> {retention.overdue}</div>
-            <div><b>Retention rate:</b> {retention.retentionRate != null ? `${retention.retentionRate}%` : '—'}</div>
+          <div className="pill-row">
+            <span className="pill good">Renewed <b>{retention.renewed}</b></span>
+            <span className="pill bad">Not renewing <b>{retention.notRenewing}</b></span>
+            <span className="pill">Pending <b>{retention.pending}</b></span>
+            <span className="pill warn">Overdue <b>{retention.overdue}</b></span>
+            <span className="pill">Retention rate <b>{retention.retentionRate != null ? `${retention.retentionRate}%` : '—'}</b></span>
           </div>
         </div>
       )}
