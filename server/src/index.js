@@ -11,6 +11,7 @@ import dashboardRoutes from './routes/dashboard.js';
 import importRoutes from './routes/import.js';
 import userRoutes from './routes/users.js';
 import locationRoutes from './routes/locations.js';
+import analyticsRoutes from './routes/analytics.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -26,6 +27,7 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/import', importRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/locations', locationRoutes);
+app.use('/api/analytics', analyticsRoutes);
 
 // Serve the built React client in production (single-service deploy).
 const clientDist = path.resolve(__dirname, '../../client/dist');

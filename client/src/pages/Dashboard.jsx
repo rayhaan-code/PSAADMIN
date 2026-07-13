@@ -29,24 +29,40 @@ function CustomerRow({ c, onAction }) {
 export default function Dashboard() {
   const { user } = useAuth();
   const [stats, setStats] = useState(null);
+  const [retention, setRetention] = useState(null);
   const [data, setData] = useState({ followUpsDue: [], renewalsDue: [], reviewFlagged: [] });
   const [locations, setLocations] = useState([]);
   const [agents, setAgents] = useState([]);
   const [filters, setFilters] = useState({ locationId: '', agentId: '' });
-  const [msg, setMsg] = useState('');
+  const [toast, setToast] = useState(null);
+  const [loading, setLoading] = useState(true);
 
   const isManager = user?.role === 'MANAGER';
 
+  function showToast(message, type = 'success') {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3000);
+  }
+
   async function load() {
+    setLoading(true);
     const qs = new URLSearchParams();
     if (filters.locationId) qs.set('locationId', filters.locationId);
     if (filters.agentId) qs.set('agentId', filters.agentId);
-    const [s, t] = await Promise.all([
-      api.get('/dashboard/stats'),
-      api.get(`/dashboard/today?${qs.toString()}`),
-    ]);
-    setStats(s);
-    setData(t);
+    try {
+      const [s, t, r] = await Promise.all([
+        api.get('/dashboard/stats'),
+        api.get(`/dashboard/today?${qs.toString()}`),
+        api.get(`/analytics/retention?${qs.toString()}`),
+      ]);
+      setStats(s);
+      setData(t);
+      setRetention(r);
+    } catch (e) {
+      showToast(e.message, 'error');
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -59,30 +75,54 @@ export default function Dashboard() {
   }, [filters.locationId, filters.agentId]);
 
   async function logFollowUp(c) {
-    setMsg('');
     try {
       await api.post(`/customers/${c.id}/follow-up`, {});
-      setMsg(`Follow-up logged for ${c.name || c.phone}.`);
+      showToast(`Follow-up logged for ${c.name || c.phone}.`);
       load();
     } catch (e) {
-      setMsg(e.message);
+      showToast(e.message, 'error');
     }
   }
 
   return (
     <>
+      {toast && (
+        <div className="toast-wrap">
+          <div className={`toast ${toast.type}`}>{toast.message}</div>
+        </div>
+      )}
+
       <div className="topbar">
         <h2>Who to call today</h2>
       </div>
 
-      {stats && (
+      {loading && !stats ? (
         <div className="grid stats">
-          <div className="stat"><div className="n">{stats.dueToday}</div><div className="l">Due today / overdue</div></div>
-          <div className="stat"><div className="n">{stats.review}</div><div className="l">Needs manager review</div></div>
+          {Array.from({ length: 6 }).map((_, i) => <div key={i} className="stat"><div className="skeleton row" /></div>)}
+        </div>
+      ) : stats && (
+        <div className="grid stats">
+          <div className="stat good">
+            <div className="n">{retention?.retentionRate != null ? `${retention.retentionRate}%` : '—'}</div>
+            <div className="l">Retention rate</div>
+          </div>
+          <div className="stat bad"><div className="n">{stats.dueToday}</div><div className="l">Due today / overdue</div></div>
+          <div className="stat warn"><div className="n">{stats.review}</div><div className="l">Needs manager review</div></div>
           <div className="stat"><div className="n">{stats.renewals}</div><div className="l">Renewals</div></div>
           <div className="stat"><div className="n">{stats.leads}</div><div className="l">Leads</div></div>
-          <div className="stat"><div className="n">{stats.followups}</div><div className="l">Follow-ups</div></div>
           <div className="stat"><div className="n">{stats.total}</div><div className="l">Total customers</div></div>
+        </div>
+      )}
+
+      {retention && (
+        <div className="card">
+          <h3 style={{ marginTop: 0 }}>Renewal health</h3>
+          <div className="row">
+            <div><b>Renewed:</b> {retention.renewed}</div>
+            <div><b>Not renewing:</b> {retention.notRenewing}</div>
+            <div><b>Pending:</b> {retention.pending}</div>
+            <div><b>Overdue:</b> {retention.overdue}</div>
+          </div>
         </div>
       )}
 
@@ -104,8 +144,6 @@ export default function Dashboard() {
           </div>
         </div>
       )}
-
-      {msg && <div className="card" style={{ background: '#ecfdf5' }}>{msg}</div>}
 
       <Section title={`Follow-ups due / overdue (${data.followUpsDue.length})`} rows={data.followUpsDue} onAction={logFollowUp} />
       <Section title={`Renewals due soon (${data.renewalsDue.length})`} rows={data.renewalsDue} onAction={logFollowUp} />
