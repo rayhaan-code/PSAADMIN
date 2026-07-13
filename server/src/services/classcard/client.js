@@ -54,6 +54,17 @@ export function hasAnyKey() {
   return Object.keys(process.env).some((k) => k.startsWith('CLASSCARD_API_KEY_'));
 }
 
+// Build a `?a=1&b=2` query string, skipping empty/null/undefined values.
+// Used so GET calls send params in the URL (some runtimes reject a body on GET).
+function qs(params) {
+  const sp = new URLSearchParams();
+  for (const [k, v] of Object.entries(params || {})) {
+    if (v !== undefined && v !== null && v !== '') sp.set(k, String(v));
+  }
+  const s = sp.toString();
+  return s ? `?${s}` : '';
+}
+
 // Low-level request helper. Returns parsed JSON or throws a readable error.
 // `cfg` is the resolved branch config ({ apiKey, baseUrl }).
 async function ccRequest(cfg, method, pathAndQuery, body) {
@@ -96,13 +107,14 @@ export function getPayments(cfg, { detailed = true } = {}) {
 }
 
 // GET /students/list/ — look up a student, optionally by email.
+// Params go in the query string (GET must not carry a body on some runtimes).
 export function getStudentList(cfg, { email } = {}) {
-  return ccRequest(cfg, 'GET', 'students/list/', email ? { email } : {});
+  return ccRequest(cfg, 'GET', 'students/list/' + qs({ email }));
 }
 
 // GET /students/events/ — a student's events/sessions in a date range (attendance source).
 export function getStudentEvents(cfg, { student, start, end }) {
-  return ccRequest(cfg, 'GET', 'students/events/', { student, start, end });
+  return ccRequest(cfg, 'GET', 'students/events/' + qs({ student, start, end }));
 }
 
 // GET /students/invoices/{studentId} — invoices for a single student.
@@ -112,7 +124,7 @@ export function getStudentInvoices(cfg, studentId, { timezone = 'Asia/Dubai' } =
 
 // GET /staff/events/ — staff (agent) events; used for capacity/scheduling context.
 export function getStaffEvents(cfg, { staff_id, start, end } = {}) {
-  return ccRequest(cfg, 'GET', 'staff/events/', { staff_id, start, end });
+  return ccRequest(cfg, 'GET', 'staff/events/' + qs({ staff_id, start, end }));
 }
 
 // GET /staff/services?staff_id= — services a staff member offers.

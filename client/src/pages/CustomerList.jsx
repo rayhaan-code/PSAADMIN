@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/auth.jsx';
+import DateRangeFilter from '../components/DateRangeFilter.jsx';
+import { thisMonthRange } from '../lib/dates.js';
 
 function fmtDate(d) { return d ? new Date(d).toISOString().slice(0, 10) : '—'; }
 
@@ -13,7 +15,10 @@ export default function CustomerList() {
   const [page, setPage] = useState(1);
   const [locations, setLocations] = useState([]);
   const [agents, setAgents] = useState([]);
-  const [filters, setFilters] = useState({ q: '', listType: '', status: '', locationId: '', agentId: '', review: '' });
+  const [filters, setFilters] = useState({
+    q: '', listType: '', status: '', locationId: '', agentId: '', review: '',
+    ...thisMonthRange(), dateField: 'createdAt',
+  });
   const [options, setOptions] = useState({ status: [], listType: [] });
 
   async function load() {
@@ -86,6 +91,20 @@ export default function CustomerList() {
             <option value="true">Flagged only</option>
           </select>
         </div>
+        <DateRangeFilter
+          start={filters.start}
+          end={filters.end}
+          onChange={setF}
+          extra={(
+            <div>
+              <label>Date field</label>
+              <select value={filters.dateField} onChange={(e) => setF('dateField', e.target.value)}>
+                <option value="createdAt">Created date</option>
+                <option value="lastActivity">Last activity</option>
+              </select>
+            </div>
+          )}
+        />
       </div>
 
       <div className="card">

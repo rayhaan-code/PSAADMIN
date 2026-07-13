@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api.js';
+import DateRangeFilter from '../components/DateRangeFilter.jsx';
+import { thisMonthRange } from '../lib/dates.js';
 
 function fmtDateTime(d) { return new Date(d).toLocaleString(); }
 
@@ -11,12 +13,16 @@ export default function ImportPage() {
   const [batches, setBatches] = useState([]);
   const [users, setUsers] = useState([]);
   const [assignToUserId, setAssignToUserId] = useState('');
+  const [range, setRange] = useState(thisMonthRange());
 
   function loadBatches() {
-    api.get('/import/batches').then(setBatches).catch(() => {});
+    const q = `start=${range.start || ''}&end=${range.end || ''}`;
+    api.get(`/import/batches?${q}`).then(setBatches).catch(() => {});
   }
   useEffect(() => {
     loadBatches();
+  }, [range.start, range.end]);
+  useEffect(() => {
     api.get('/users').then(setUsers).catch(() => {});
   }, []);
 
@@ -94,6 +100,13 @@ export default function ImportPage() {
 
       <div className="card">
         <h3 style={{ marginTop: 0 }}>Recent imports</h3>
+        <div className="row" style={{ marginBottom: 12 }}>
+          <DateRangeFilter
+            start={range.start}
+            end={range.end}
+            onChange={(key, value) => setRange((r) => ({ ...r, [key]: value }))}
+          />
+        </div>
         <table>
           <thead><tr><th>When</th><th>File</th><th>Format</th><th>Location</th><th>Created</th><th>Updated</th><th>By</th></tr></thead>
           <tbody>

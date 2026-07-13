@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { prisma } from '../lib/prisma.js';
 import { requireAuth, scopeForUser } from '../middleware/auth.js';
-import { nextFollowUp, parseExcelDate } from '../lib/date.js';
+import { nextFollowUp, parseExcelDate, dateRangeFilter } from '../lib/date.js';
 import { normalizePhone } from '../lib/phone.js';
 import { STATUS_OPTIONS, PAYMENT_STATUS_OPTIONS, LEAD_STAGE_OPTIONS } from '../lib/mappings.js';
 
@@ -20,7 +20,7 @@ router.get('/options', (req, res) => {
 
 // List with filters + pagination. Agents are scoped to their own customers.
 router.get('/', async (req, res) => {
-  const { q, listType, status, locationId, agentId, program, review, page = 1, pageSize = 50 } = req.query;
+  const { q, listType, status, locationId, agentId, program, review, start, end, dateField, page = 1, pageSize = 50 } = req.query;
   const where = scopeForUser(req.user, {});
 
   if (listType) where.listType = listType;
@@ -30,6 +30,18 @@ router.get('/', async (req, res) => {
   if (locationId) where.locationId = Number(locationId);
   // Managers can filter by a specific agent
   if (agentId && req.user.role === 'MANAGER') where.assignedAgentId = Number(agentId);
+
+  // Date-range filter. `dateField` selects which date to filter on:
+  //   'lastActivity' -> customers with an activity in range
+  //   'createdAt' (default) -> customers created in range
+  const range = dateRangeFilter(start, end);
+  if (range) {
+    if (dateField === 'lastActivity') {
+      where.activities = { some: { createdAt: range } };
+    } else {
+      where.createdAt = range;
+    }
+  }
   if (q) {
     where.OR = [
       { name: { contains: String(q), mode: 'insensitive' } },

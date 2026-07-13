@@ -15,6 +15,7 @@ export default function CustomerDetail() {
   const [agents, setAgents] = useState([]);
   const [note, setNote] = useState('');
   const [msg, setMsg] = useState('');
+  const [classcard, setClasscard] = useState(null);
 
   async function load() {
     const data = await api.get(`/customers/${id}`);
@@ -26,6 +27,13 @@ export default function CustomerDetail() {
     if (isManager) api.get('/users').then((u) => setAgents(u.filter((x) => x.role === 'AGENT'))).catch(() => {});
   // eslint-disable-next-line
   }, [id]);
+
+  // ClassCard student summary (managers only — the endpoint is manager-scoped).
+  useEffect(() => {
+    if (!isManager) return;
+    setClasscard(null);
+    api.get(`/classcard/student/summary?customerId=${id}`).then(setClasscard).catch(() => setClasscard(null));
+  }, [id, isManager]);
 
   if (!c) return <div>Loading…</div>;
 
@@ -115,6 +123,36 @@ export default function CustomerDetail() {
           </button>
         </div>
       </div>
+
+      {isManager && classcard && classcard.configured !== false && (
+        <div className="card">
+          <h3 style={{ marginTop: 0 }}>ClassCard {classcard.branch ? <span className="muted">· {classcard.branch}</span> : null}</h3>
+          {!classcard.matched ? (
+            <p className="muted">{classcard.message || 'No ClassCard student matched this customer.'}</p>
+          ) : (
+            <>
+              <p>
+                <b>Matched student:</b> {classcard.studentName || `#${classcard.studentId}`}
+              </p>
+              {classcard.attendance && (
+                <p className="muted">
+                  Attendance ({classcard.window?.start} → {classcard.window?.end}):
+                  {' '}marked {classcard.attendance.marked},
+                  {' '}<b>unmarked {classcard.attendance.unmarked}</b>,
+                  {' '}upcoming {classcard.attendance.upcoming} (of {classcard.attendance.total})
+                </p>
+              )}
+              {classcard.invoices && (
+                <p className="muted">
+                  Invoices: paid {classcard.invoices.paid},
+                  {' '}pending {classcard.invoices.pending} (AED {classcard.invoices.pendingAmount}),
+                  {' '}<b>overdue {classcard.invoices.overdue} (AED {classcard.invoices.overdueAmount})</b>
+                </p>
+              )}
+            </>
+          )}
+        </div>
+      )}
 
       <div className="card">
         <h3 style={{ marginTop: 0 }}>History</h3>

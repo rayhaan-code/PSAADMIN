@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/auth.jsx';
+import DateRangeFilter from '../components/DateRangeFilter.jsx';
+import { thisMonthRange } from '../lib/dates.js';
 
 function fmtDate(d) {
   if (!d) return '—';
@@ -33,7 +35,7 @@ export default function Dashboard() {
   const [data, setData] = useState({ followUpsDue: [], renewalsDue: [], reviewFlagged: [] });
   const [locations, setLocations] = useState([]);
   const [agents, setAgents] = useState([]);
-  const [filters, setFilters] = useState({ locationId: '', agentId: '' });
+  const [filters, setFilters] = useState({ locationId: '', agentId: '', ...thisMonthRange() });
   const [toast, setToast] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -49,11 +51,15 @@ export default function Dashboard() {
     const qs = new URLSearchParams();
     if (filters.locationId) qs.set('locationId', filters.locationId);
     if (filters.agentId) qs.set('agentId', filters.agentId);
+    // Date range applies to the KPI stats + retention (created-in-period).
+    const dqs = new URLSearchParams(qs);
+    if (filters.start) dqs.set('start', filters.start);
+    if (filters.end) dqs.set('end', filters.end);
     try {
       const [s, t, r] = await Promise.all([
-        api.get('/dashboard/stats'),
+        api.get(`/dashboard/stats?${dqs.toString()}`),
         api.get(`/dashboard/today?${qs.toString()}`),
-        api.get(`/analytics/retention?${qs.toString()}`),
+        api.get(`/analytics/retention?${dqs.toString()}`),
       ]);
       setStats(s);
       setData(t);
@@ -72,7 +78,7 @@ export default function Dashboard() {
       api.get('/users').then((u) => setAgents(u.filter((x) => x.role === 'AGENT'))).catch(() => {});
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters.locationId, filters.agentId]);
+  }, [filters.locationId, filters.agentId, filters.start, filters.end]);
 
   async function logFollowUp(c) {
     try {
@@ -126,24 +132,34 @@ export default function Dashboard() {
         </div>
       )}
 
-      {isManager && (
-        <div className="filters">
-          <div>
-            <label>Location</label>
-            <select value={filters.locationId} onChange={(e) => setFilters((f) => ({ ...f, locationId: e.target.value }))}>
-              <option value="">All locations</option>
-              {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label>Agent</label>
-            <select value={filters.agentId} onChange={(e) => setFilters((f) => ({ ...f, agentId: e.target.value }))}>
-              <option value="">All agents</option>
-              {agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-            </select>
-          </div>
-        </div>
-      )}
+      <div className="filters">
+        <DateRangeFilter
+          start={filters.start}
+          end={filters.end}
+          onChange={(k, v) => setFilters((f) => ({ ...f, [k]: v }))}
+        />
+        {isManager && (
+          <>
+            <div>
+              <label>Location</label>
+              <select value={filters.locationId} onChange={(e) => setFilters((f) => ({ ...f, locationId: e.target.value }))}>
+                <option value="">All locations</option>
+                {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label>Agent</label>
+              <select value={filters.agentId} onChange={(e) => setFilters((f) => ({ ...f, agentId: e.target.value }))}>
+                <option value="">All agents</option>
+                {agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+            </div>
+          </>
+        )}
+      </div>
+      <p className="muted" style={{ marginTop: -4, fontSize: 12 }}>
+        Date range scopes the KPI stats above. The call lists below always show what's currently due.
+      </p>
 
       <Section title={`Follow-ups due / overdue (${data.followUpsDue.length})`} rows={data.followUpsDue} onAction={logFollowUp} />
       <Section title={`Renewals due soon (${data.renewalsDue.length})`} rows={data.renewalsDue} onAction={logFollowUp} />

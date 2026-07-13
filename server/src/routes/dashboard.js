@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { prisma } from '../lib/prisma.js';
 import { requireAuth, scopeForUser } from '../middleware/auth.js';
-import { startOfToday, addDays } from '../lib/date.js';
+import { startOfToday, addDays, dateRangeFilter } from '../lib/date.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -44,15 +44,20 @@ router.get('/today', async (req, res) => {
 });
 
 // Summary counts for the top of the dashboard.
+// A date range (start/end) scopes the "created in period" KPIs (total/leads/
+// renewals/followups). The operational counts (dueToday/review) are always live.
 router.get('/stats', async (req, res) => {
   const scope = scopeForUser(req.user, {});
   const today = startOfToday();
 
+  const range = dateRangeFilter(req.query.start, req.query.end);
+  const scoped = range ? { ...scope, createdAt: range } : scope;
+
   const [total, leads, renewals, followups, dueToday, review] = await Promise.all([
-    prisma.customer.count({ where: scope }),
-    prisma.customer.count({ where: { ...scope, listType: 'LEAD' } }),
-    prisma.customer.count({ where: { ...scope, listType: 'RENEWAL' } }),
-    prisma.customer.count({ where: { ...scope, listType: 'FOLLOW_UP' } }),
+    prisma.customer.count({ where: scoped }),
+    prisma.customer.count({ where: { ...scoped, listType: 'LEAD' } }),
+    prisma.customer.count({ where: { ...scoped, listType: 'RENEWAL' } }),
+    prisma.customer.count({ where: { ...scoped, listType: 'FOLLOW_UP' } }),
     prisma.customer.count({ where: { ...scope, nextFollowUpDate: { lte: today } } }),
     prisma.customer.count({ where: { ...scope, needsManagerReview: true } }),
   ]);

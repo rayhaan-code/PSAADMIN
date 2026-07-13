@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/auth.jsx';
+import DateRangeFilter from '../components/DateRangeFilter.jsx';
+import { thisMonthRange } from '../lib/dates.js';
 
 function Stat({ label, value, tone }) {
   return (
@@ -87,6 +89,50 @@ function ClassCardPanel({ locationId }) {
   );
 }
 
+function StudentsPanel({ locationId }) {
+  const [data, setData] = useState(null);
+  const [q, setQ] = useState('');
+
+  useEffect(() => {
+    setData(null); setQ('');
+    const query = locationId ? `?locationId=${locationId}` : '';
+    api.get(`/classcard/students${query}`).then(setData).catch(() => setData({ configured: false }));
+  }, [locationId]);
+
+  if (data && data.configured === false) return null; // ClassCardPanel already shows the "not connected" note.
+
+  const students = data?.students || [];
+  const needle = q.trim().toLowerCase();
+  const rows = needle
+    ? students.filter((s) => `${s.name || ''} ${s.phone || ''} ${s.email || ''}`.toLowerCase().includes(needle))
+    : students;
+
+  return (
+    <div className="card">
+      <h3 style={{ marginTop: 0 }}>ClassCard — students {data ? `(${data.count ?? students.length})` : ''}</h3>
+      {!data ? (
+        <p className="muted">Loading students…</p>
+      ) : (
+        <>
+          <div style={{ marginBottom: 8, maxWidth: 260 }}>
+            <input placeholder="Search name, phone, email" value={q} onChange={(e) => setQ(e.target.value)} />
+          </div>
+          <table>
+            <thead><tr><th>Name</th><th>Phone</th><th>Email</th></tr></thead>
+            <tbody>
+              {rows.slice(0, 100).map((s) => (
+                <tr key={s.studentId}><td>{s.name || '—'}</td><td>{s.phone || '—'}</td><td>{s.email || '—'}</td></tr>
+              ))}
+              {rows.length === 0 && <tr><td colSpan={3} className="muted">No students match.</td></tr>}
+            </tbody>
+          </table>
+          {rows.length > 100 && <p className="muted">Showing first 100 of {rows.length}. Refine your search to narrow down.</p>}
+        </>
+      )}
+    </div>
+  );
+}
+
 function SummaryCards({ s }) {
   if (!s) return null;
   return (
@@ -128,7 +174,11 @@ export default function Analytics() {
   const [branch, setBranch] = useState(null);
   const [userView, setUserView] = useState(null);
   const [branchesOverview, setBranchesOverview] = useState([]);
+  const [range, setRange] = useState(thisMonthRange());
   const [toast, setToast] = useState(null);
+
+  // `?start=&end=` suffix for analytics calls (KPIs scoped to the created-in-period range).
+  const rangeQs = `start=${range.start || ''}&end=${range.end || ''}`;
 
   function showToast(message, type = 'error') {
     setToast({ message, type });
@@ -142,31 +192,39 @@ export default function Analytics() {
         if (ls.length && !locationId) setLocationId(String(ls[0].id));
       }).catch(() => {});
       api.get('/users').then((u) => setAgents(u.filter((x) => x.role === 'AGENT'))).catch(() => {});
-      api.get('/analytics/branches').then(setBranchesOverview).catch(() => {});
-    }
-    // agents: load own user view immediately
-    if (!isManager) {
-      api.get('/analytics/user').then(setUserView).catch((e) => showToast(e.message));
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Load branch view when a location is chosen
-  useEffect(() => {
-    if (!isManager || !locationId) return;
-    api.get(`/analytics/branch?locationId=${locationId}`).then(setBranch).catch((e) => showToast(e.message));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [locationId]);
-
-  // Load user view when a user is chosen (manager)
+  // Branches overview reloads with the date range (manager overview tab).
   useEffect(() => {
     if (!isManager) return;
-    const q = userId ? `?userId=${userId}` : '';
+    api.get(`/analytics/branches?${rangeQs}`).then(setBranchesOverview).catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [range.start, range.end]);
+
+  // Agents: load own user view immediately, and refresh on range change.
+  useEffect(() => {
+    if (isManager) return;
+    api.get(`/analytics/user?${rangeQs}`).then(setUserView).catch((e) => showToast(e.message));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [range.start, range.end]);
+
+  // Load branch view when a location or range is chosen
+  useEffect(() => {
+    if (!isManager || !locationId) return;
+    api.get(`/analytics/branch?locationId=${locationId}&${rangeQs}`).then(setBranch).catch((e) => showToast(e.message));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [locationId, range.start, range.end]);
+
+  // Load user view when a user or range is chosen (manager)
+  useEffect(() => {
+    if (!isManager) return;
     if (tab === 'user' && userId) {
-      api.get(`/analytics/user${q}`).then(setUserView).catch((e) => showToast(e.message));
+      api.get(`/analytics/user?userId=${userId}&${rangeQs}`).then(setUserView).catch((e) => showToast(e.message));
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId, tab]);
+  }, [userId, tab, range.start, range.end]);
 
   return (
     <>
@@ -174,8 +232,8 @@ export default function Analytics() {
 
       <div className="topbar"><h2>Analytics</h2></div>
 
-      {isManager && (
-        <div className="filters">
+      <div className="filters">
+        {isManager && (
           <div>
             <label>View</label>
             <select value={tab} onChange={(e) => setTab(e.target.value)}>
@@ -184,8 +242,13 @@ export default function Analytics() {
               <option value="overview">All branches</option>
             </select>
           </div>
-        </div>
-      )}
+        )}
+        <DateRangeFilter
+          start={range.start}
+          end={range.end}
+          onChange={(k, v) => setRange((r) => ({ ...r, [k]: v }))}
+        />
+      </div>
 
       {/* BRANCH VIEW */}
       {isManager && tab === 'branch' && (
@@ -218,6 +281,7 @@ export default function Analytics() {
           )}
           {/* ClassCard metrics for the selected branch */}
           {locationId && <ClassCardPanel locationId={locationId} />}
+          {locationId && <StudentsPanel locationId={locationId} />}
         </>
       )}
 

@@ -71,6 +71,20 @@ export function startOfToday() {
   return d;
 }
 
+// Build a Prisma date filter from YYYY-MM-DD strings. The end date is INCLUSIVE
+// (we add one day and use `lt`, so the whole end day is covered). Returns null
+// when neither bound is provided, so callers can conditionally attach it.
+export function dateRangeFilter(start, end) {
+  const f = {};
+  if (start) f.gte = new Date(start + 'T00:00:00.000Z');
+  if (end) {
+    const e = new Date(end + 'T00:00:00.000Z');
+    e.setUTCDate(e.getUTCDate() + 1);
+    f.lt = e;
+  }
+  return (f.gte || f.lt) ? f : null;
+}
+
 // Follow-up stage -> next interval in days. stage1 -> +2, stage2 -> +5, stage3 -> review.
 export function nextFollowUp(currentStage) {
   const stage = (currentStage || 0) + 1;

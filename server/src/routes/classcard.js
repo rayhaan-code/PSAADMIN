@@ -57,6 +57,17 @@ async function branchConfig(req) {
   return { cfg: cc.resolveBranchConfig(location), location };
 }
 
+// Match a CRM customer to a ClassCard student by phone (confirmed via email when
+// available). Returns the student object or null when no confident match exists.
+async function findStudentForCustomer(cfg, customer) {
+  const target = normalizePhone(customer.phone);
+  if (customer.email) {
+    const list = asArray(await cc.getStudentList(cfg, { email: customer.email }));
+    return list.find((s) => normalizePhone(pick(s, ['phone1', 'phone', 'mobile'], '')) === target) || list[0] || null;
+  }
+  return null;
+}
+
 // --- Connection status (managers only). ---
 router.get('/status', requireManager, async (req, res) => {
   // Nothing configured anywhere -> "connect ClassCard" state.
@@ -126,14 +137,8 @@ router.get('/attendance/unmarked', requireManager, async (req, res, next) => {
     const customer = await prisma.customer.findUnique({ where: { id: customerId } });
     if (!customer) return res.status(404).json({ error: 'Customer not found' });
 
-    // Find the ClassCard student by phone. We fetch by email if we have one,
-    // then confirm the phone matches; otherwise we can only report "no match".
-    const target = normalizePhone(customer.phone);
-    let student = null;
-    if (customer.email) {
-      const list = asArray(await cc.getStudentList(cfg, { email: customer.email }));
-      student = list.find((s) => normalizePhone(pick(s, ['phone1', 'phone', 'mobile'], '')) === target) || list[0] || null;
-    }
+    // Find the ClassCard student by phone (confirmed via email when available).
+    const student = await findStudentForCustomer(cfg, customer);
     if (!student) {
       return res.json({ configured: true, branch: location ? location.name : null, matched: false, message: 'No ClassCard student matched this customer.' });
     }
@@ -200,6 +205,99 @@ router.get('/capacity', requireManager, async (req, res, next) => {
       : null;
 
     res.json({ configured: true, branch: location ? location.name : null, classes: rows.length, full, avgUtilization: avgUtil, rows });
+  } catch (err) { next(err); }
+});
+
+// Summarize a list of ClassCard invoices into paid/pending/overdue counts+amounts.
+function summarizeInvoices(invoices) {
+  const now = new Date();
+  let pending = 0, overdue = 0, paid = 0, pendingAmount = 0, overdueAmount = 0;
+  for (const inv of invoices) {
+    const status = String(pick(inv, ['status', 'invoice_status', 'state'], '')).toLowerCase();
+    const amount = Number(pick(inv, ['balance', 'amount_due', 'due', 'total', 'amount'], 0)) || 0;
+    const dueRaw = pick(inv, ['due_date', 'dueDate', 'due', 'date_due']);
+    const dueDate = dueRaw ? new Date(dueRaw) : null;
+    const isPaid = status.includes('paid') || Number(pick(inv, ['balance', 'amount_due'], 1)) === 0;
+    if (isPaid) { paid++; continue; }
+    if (dueDate && !isNaN(dueDate) && dueDate < now) { overdue++; overdueAmount += amount; }
+    else { pending++; pendingAmount += amount; }
+  }
+  return {
+    total: invoices.length, paid, pending, overdue,
+    pendingAmount: Math.round(pendingAmount * 100) / 100,
+    overdueAmount: Math.round(overdueAmount * 100) / 100,
+  };
+}
+
+// --- Per-customer ClassCard summary (attendance + invoices), matched by phone. ---
+// Query: ?customerId= & ?locationId= (optional) & ?start= & ?end= (attendance window)
+router.get('/student/summary', requireManager, async (req, res, next) => {
+  const customerId = req.query.customerId ? Number(req.query.customerId) : null;
+  if (!customerId) return res.status(400).json({ error: 'customerId is required' });
+
+  const customer = await prisma.customer.findUnique({ where: { id: customerId } });
+  if (!customer) return res.status(404).json({ error: 'Customer not found' });
+
+  // Default branch to the customer's own location when not supplied.
+  if (!req.query.locationId && customer.locationId) req.query.locationId = String(customer.locationId);
+  const { cfg, location } = await branchConfig(req);
+  if (!cc.isConfigured(cfg)) return notConfigured(res, { branch: location ? location.name : null });
+
+  try {
+    const student = await findStudentForCustomer(cfg, customer);
+    if (!student) {
+      return res.json({ configured: true, branch: location ? location.name : null, matched: false, message: 'No ClassCard student matched this customer.' });
+    }
+    const studentId = pick(student, ['id', 'student_id', 'studentId']);
+
+    // Attendance window (default last 30 days).
+    const end = req.query.end || new Date().toISOString().slice(0, 10);
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - 30);
+    const start = req.query.start || startDate.toISOString().slice(0, 10);
+
+    const [eventsRaw, invoicesRaw] = await Promise.all([
+      cc.getStudentEvents(cfg, { student: studentId, start, end }),
+      cc.getStudentInvoices(cfg, studentId).catch(() => []),
+    ]);
+
+    const events = asArray(eventsRaw);
+    const now = new Date();
+    let unmarked = 0, marked = 0, upcoming = 0;
+    for (const ev of events) {
+      const when = new Date(pick(ev, ['start', 'date', 'start_time'], null));
+      const att = pick(ev, ['attendance', 'attendance_status', 'status', 'attended']);
+      if (when && when > now) { upcoming++; continue; }
+      if (att === null || att === undefined || att === '') unmarked++;
+      else marked++;
+    }
+
+    res.json({
+      configured: true,
+      branch: location ? location.name : null,
+      matched: true,
+      studentId,
+      studentName: pick(student, ['name', 'full_name', 'student_name'], null),
+      window: { start, end },
+      attendance: { total: events.length, marked, unmarked, upcoming },
+      invoices: summarizeInvoices(asArray(invoicesRaw)),
+    });
+  } catch (err) { next(err); }
+});
+
+// --- Branch student list (managers only). List-only to stay fast (no N+1). ---
+router.get('/students', requireManager, async (req, res, next) => {
+  const { cfg, location } = await branchConfig(req);
+  if (!cc.isConfigured(cfg)) return notConfigured(res, { branch: location ? location.name : null });
+  try {
+    const list = asArray(await cc.getStudentList(cfg, {}));
+    const students = list.map((s) => ({
+      studentId: pick(s, ['id', 'student_id', 'studentId'], null),
+      name: pick(s, ['name', 'full_name', 'student_name'], null),
+      phone: pick(s, ['phone1', 'phone', 'mobile'], null),
+      email: pick(s, ['email', 'email1'], null),
+    }));
+    res.json({ configured: true, branch: location ? location.name : null, count: students.length, students });
   } catch (err) { next(err); }
 });
 

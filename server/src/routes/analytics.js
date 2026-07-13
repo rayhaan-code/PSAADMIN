@@ -2,9 +2,16 @@
 import { Router } from 'express';
 import { prisma } from '../lib/prisma.js';
 import { requireAuth, scopeForUser } from '../middleware/auth.js';
+import { dateRangeFilter } from '../lib/date.js';
 
 const router = Router();
 router.use(requireAuth);
+
+// Merge an optional created-in-period range into a Prisma "where" scope.
+function withRange(scope, req) {
+  const range = dateRangeFilter(req.query.start, req.query.end);
+  return range ? { ...scope, createdAt: range } : scope;
+}
 
 // Retention = Renewed ÷ (Renewed + Not Renewing), among RENEWAL-list customers.
 // "Renewed" = paymentStatus Paid; "Not Renewing" = paymentStatus 'Not Renewing'.
@@ -13,7 +20,7 @@ router.get('/retention', async (req, res) => {
   const extra = { listType: 'RENEWAL' };
   if (req.query.locationId) extra.locationId = Number(req.query.locationId);
   if (req.query.agentId && req.user.role === 'MANAGER') extra.assignedAgentId = Number(req.query.agentId);
-  const scope = scopeForUser(req.user, extra);
+  const scope = withRange(scopeForUser(req.user, extra), req);
 
   const [renewed, notRenewing, pending, overdue, totalRenewal] = await Promise.all([
     prisma.customer.count({ where: { ...scope, paymentStatus: 'Paid' } }),
@@ -74,12 +81,12 @@ router.get('/branch', async (req, res) => {
   const location = await prisma.location.findUnique({ where: { id: locationId } });
   if (!location) return res.status(404).json({ error: 'Location not found' });
 
-  const summary = await summaryFor({ locationId });
+  const summary = await summaryFor(withRange({ locationId }, req));
 
   // Per-agent leaderboard: customers assigned to each agent within this branch.
   const grouped = await prisma.customer.groupBy({
     by: ['assignedAgentId'],
-    where: { locationId },
+    where: withRange({ locationId }, req),
     _count: { _all: true },
   });
   const agentIds = grouped.map((g) => g.assignedAgentId).filter((x) => x != null);
@@ -117,7 +124,7 @@ router.get('/user', async (req, res) => {
   if (!target) return res.status(404).json({ error: 'User not found' });
 
   const scope = { assignedAgentId: targetId };
-  const summary = await summaryFor(scope);
+  const summary = await summaryFor(withRange(scope, req));
 
   // Follow-ups due/overdue for this user + recent activity count.
   const now = new Date();
@@ -141,7 +148,7 @@ router.get('/branches', async (req, res) => {
   const locations = await prisma.location.findMany({ orderBy: { name: 'asc' } });
   const rows = [];
   for (const loc of locations) {
-    const summary = await summaryFor({ locationId: loc.id });
+    const summary = await summaryFor(withRange({ locationId: loc.id }, req));
     rows.push({ id: loc.id, name: loc.name, ...summary });
   }
   res.json(rows);

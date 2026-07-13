@@ -3,6 +3,7 @@ import multer from 'multer';
 import { requireAuth, requireManager } from '../middleware/auth.js';
 import { importWorkbookBuffer } from '../services/import/index.js';
 import { prisma } from '../lib/prisma.js';
+import { dateRangeFilter } from '../lib/date.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
@@ -33,7 +34,9 @@ router.post('/', requireAuth, requireManager, upload.array('files', 30), async (
 
 // History of import batches.
 router.get('/batches', requireAuth, requireManager, async (req, res) => {
+  const range = dateRangeFilter(req.query.start, req.query.end);
   const batches = await prisma.importBatch.findMany({
+    where: range ? { createdAt: range } : {},
     include: { location: true, createdBy: { select: { id: true, name: true } } },
     orderBy: { createdAt: 'desc' },
     take: 100,
